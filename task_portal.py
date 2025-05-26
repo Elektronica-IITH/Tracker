@@ -1,14 +1,18 @@
 import streamlit as st
 import gspread
+import os
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import uuid
 
-# Google Sheets Auth
 @st.cache_resource
 def get_gsheet_client():
+    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    creds_dict = json.loads(creds_json)
+    
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 gc = get_gsheet_client()
