@@ -50,20 +50,51 @@ def clear_cache():
     """Clear all cached data"""
     st.cache_data.clear()
 
-def ensure_user(username, role):
-    """Add new user if not exists"""
+def verify_user_credentials(username, password, role):
+    """Verify user credentials against Google Sheets"""
     try:
         users = load_users()
-        if not any(u['username'] == username for u in users):
+        
+        # Check if user exists
+        existing_user = None
+        for user in users:
+            if user['username'] == username:
+                existing_user = user
+                break
+        
+        if existing_user:
+            # User exists, check password
+            stored_password = existing_user.get('password', '')
+            return stored_password == password, "existing"
+        else:
+            # New user, any password is acceptable for registration
+            return True, "new"
+            
+    except Exception as e:
+        return False, f"Error verifying credentials: {e}"
+
+def ensure_user(username, role, password):
+    """Add new user or verify existing user credentials"""
+    try:
+        is_valid, user_status = verify_user_credentials(username, password, role)
+        
+        if not is_valid:
+            return False, user_status  # This would be an error message
+            
+        if user_status == "new":
+            # Add new user with password
             gc = get_gsheet_client()
             user_sheet = gc.open("Task-management").worksheet("users")
-            user_sheet.append_row([username, role])
+            user_sheet.append_row([username, role, password])
             clear_cache()
-            return True
-        return False
+            return True, "New user created successfully"
+        elif user_status == "existing":
+            return True, "Login successful"
+        else:
+            return False, "Invalid credentials"
+            
     except Exception as e:
-        st.error(f"Error adding user: {e}")
-        return False
+        return False, f"Error managing user: {e}"
 
 def add_task(title, desc, assigned_to, created_by):
     """Add new task"""
@@ -79,6 +110,22 @@ def add_task(title, desc, assigned_to, created_by):
         st.error(f"Error adding task: {e}")
         return False
 
+def find_task_row(task_id):
+    """Find task row by ID"""
+    try:
+        gc = get_gsheet_client()
+        task_sheet = gc.open("Task-management").worksheet("tasks")
+        
+        # Get all values to find the task
+        all_values = task_sheet.get_all_values()
+        for i, row in enumerate(all_values):
+            if len(row) > 0 and str(row[0]) == str(task_id):  # ID is in first column
+                return i + 1  # Return row number (1-indexed)
+        return None
+    except Exception as e:
+        st.error(f"Error finding task: {e}")
+        return None
+
 def update_task_status(task_id, new_status):
     """Update task status"""
     try:
@@ -86,10 +133,10 @@ def update_task_status(task_id, new_status):
         task_sheet = gc.open("Task-management").worksheet("tasks")
         
         # Find the task row
-        cell = task_sheet.find(task_id)
-        if cell:
+        row_num = find_task_row(task_id)
+        if row_num:
             # Update status column (column 6)
-            task_sheet.update_cell(cell.row, 6, new_status)
+            task_sheet.update_cell(row_num, 6, new_status)
             clear_cache()
             return True
         return False
@@ -104,9 +151,9 @@ def delete_task(task_id):
         task_sheet = gc.open("Task-management").worksheet("tasks")
         
         # Find the task row
-        cell = task_sheet.find(task_id)
-        if cell:
-            task_sheet.delete_rows(cell.row)
+        row_num = find_task_row(task_id)
+        if row_num:
+            task_sheet.delete_rows(row_num)
             clear_cache()
             return True
         return False
@@ -121,10 +168,10 @@ def reassign_task(task_id, new_assignee):
         task_sheet = gc.open("Task-management").worksheet("tasks")
         
         # Find the task row
-        cell = task_sheet.find(task_id)
-        if cell:
+        row_num = find_task_row(task_id)
+        if row_num:
             # Update assigned_to column (column 4)
-            task_sheet.update_cell(cell.row, 4, new_assignee)
+            task_sheet.update_cell(row_num, 4, new_assignee)
             clear_cache()
             return True
         return False
@@ -133,24 +180,40 @@ def reassign_task(task_id, new_assignee):
         return False
 
 def login():
-    """Handle user login"""
+    """Handle user login with password system from Google Sheets"""
     st.sidebar.title("🔐 Login")
+    
+    # Show instructions
+    with st.sidebar.expander("ℹ️ Login Instructions"):
+        st.markdown("""
+        **For Existing Users:**
+        - Enter your username and password
+        
+        **For New Users:**
+        - Enter desired username
+        - Enter desired password
+        - Select your role
+        - System will create your account
+        
+        **Note:** Passwords are stored in the 'users' sheet
+        """)
+    
     username = st.sidebar.text_input("Username", key="login_username")
+    password = st.sidebar.text_input("Password", type="password", key="login_password")
     role = st.sidebar.selectbox("Role", ["Coordinator", "Head"], key="login_role")
     
     if st.sidebar.button("Login", key="login_btn"):
-        if username.strip():
-            is_new = ensure_user(username, role)
-            st.session_state["username"] = username
-            st.session_state["role"] = role
-            
-            if is_new:
-                st.sidebar.success(f"New user created: {username} ({role})")
+        if username.strip() and password.strip():
+            success, message = ensure_user(username, role, password)
+            if success:
+                st.session_state["username"] = username
+                st.session_state["role"] = role
+                st.sidebar.success(message)
+                st.rerun()
             else:
-                st.sidebar.success(f"Logged in as {username} ({role})")
-            st.rerun()
+                st.sidebar.error(f"Login failed: {message}")
         else:
-            st.sidebar.error("Please enter a username")
+            st.sidebar.error("Please enter both username and password")
 
 def coordinator_view():
     """Coordinator dashboard"""
