@@ -7,8 +7,8 @@ import uuid
 # Google Sheets Auth
 @st.cache_resource
 def get_gsheet_client():
-    creds_dict = st.secrets["google"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"])
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
     return gspread.authorize(creds)
 
 gc = get_gsheet_client()
