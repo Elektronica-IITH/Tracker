@@ -59,15 +59,12 @@ def load_tasks():
     try:
         gc = get_gsheet_client()
         task_sheet = gc.open("Task-management").worksheet("tasks")
-        # Ensure all columns are present, fill with default if missing
         tasks = task_sheet.get_all_records()
-        # Add default values for missing columns if any
-        # This is important because get_all_records() might skip empty trailing columns
         expected_columns = ["id", "title", "description", "assigned_to", "created_by", "status", "timestamp", "deadline"]
         for task in tasks:
             for col in expected_columns:
                 if col not in task:
-                    task[col] = '' # Initialize missing column with empty string
+                    task[col] = ''
         return tasks
     except Exception as e:
         st.error(f"Error loading tasks: {e}")
@@ -97,19 +94,16 @@ def apply_pending_changes():
             st.success(f"Added {len(rows_to_add)} new task(s) to the sheet.")
         except Exception as e:
             st.error(f"Error adding new tasks: {e}")
-        st.session_state["pending_task_additions"] = [] # Clear after processing
+        st.session_state["pending_task_additions"] = []
 
     # 2. Process Deletions (do before updates to avoid conflicts)
     if st.session_state["pending_task_deletions"]:
-        # Get all records to find row numbers for deletion safely
         current_tasks = task_sheet.get_all_values()
         header = current_tasks[0]
         data_rows = current_tasks[1:]
         
-        # Build a map of task_id to current 1-indexed row number
-        task_id_to_row = {row[0]: i + 2 for i, row in enumerate(data_rows)} # +2 for header and 0-index offset
+        task_id_to_row = {row[0]: i + 2 for i, row in enumerate(data_rows)}
 
-        # Sort deletions in descending order of row number to avoid shifting issues
         rows_to_delete_actual = []
         for task_id in st.session_state["pending_task_deletions"]:
             if task_id in task_id_to_row:
@@ -123,15 +117,13 @@ def apply_pending_changes():
                 st.success(f"Deleted task at row {row_num}.")
             except Exception as e:
                 st.error(f"Error deleting task at row {row_num}: {e}")
-        st.session_state["pending_task_deletions"] = [] # Clear after processing
+        st.session_state["pending_task_deletions"] = []
 
     # 3. Process Updates
     if st.session_state["pending_task_updates"]:
-        # Reload tasks to get the current state and accurate row numbers
-        # (especially important if deletions happened)
         current_tasks_for_update = task_sheet.get_all_values()
-        header_map = {col: i + 1 for i, col in enumerate(current_tasks_for_update[0])} # 1-indexed column map
-        task_id_to_actual_row = {row[0]: i + 2 for i, row in enumerate(current_tasks_for_update[1:])} # 1-indexed actual row map
+        header_map = {col: i + 1 for i, col in enumerate(current_tasks_for_update[0])}
+        task_id_to_actual_row = {row[0]: i + 2 for i, row in enumerate(current_tasks_for_update[1:])}
 
         updates_performed = 0
         for task_id, updates in st.session_state["pending_task_updates"].items():
@@ -147,9 +139,8 @@ def apply_pending_changes():
                             st.error(f"Error updating task {task_id}, column {col_name}: {e}")
         if updates_performed > 0:
             st.success(f"Applied {updates_performed} task update(s).")
-        st.session_state["pending_task_updates"] = {} # Clear after processing
+        st.session_state["pending_task_updates"] = {}
 
-    # After applying all changes, clear cache and rerun to show latest data
     st.cache_data.clear()
     st.rerun()
 
@@ -162,7 +153,7 @@ def verify_user_credentials(username, password):
         stored_password = existing_user.get('password', '')
         return stored_password == password, "existing", existing_user.get('role')
     else:
-        return True, "new", None # For new users, any password is fine for registration
+        return True, "new", None
 
 def ensure_user(username, role, password):
     """Add new user or verify existing user credentials"""
@@ -173,7 +164,7 @@ def ensure_user(username, role, password):
             gc = get_gsheet_client()
             user_sheet = gc.open("Task-management").worksheet("users")
             user_sheet.append_row([username, role, password])
-            st.cache_data.clear() # Clear user cache after adding
+            st.cache_data.clear()
             return True, "New user created successfully", role
         elif user_status == "existing":
             if not is_valid:
@@ -242,7 +233,7 @@ def login():
                 st.session_state["username"] = username
                 st.session_state["role"] = user_role
                 st.sidebar.success(message)
-                st.rerun() # Rerun to switch to the appropriate view
+                st.rerun()
             else:
                 st.sidebar.error(f"Login failed: {message}")
         else:
@@ -272,30 +263,46 @@ def coordinator_view():
     # Add task for all coordinators (unassigned)
     st.subheader("➕ Create General Task")
     st.info("Tasks created here will be unassigned and can be assigned by Heads to specific coordinators.")
+
+    # Initialize form inputs in session state if not already present
+    if "coord_task_title_form_value" not in st.session_state:
+        st.session_state["coord_task_title_form_value"] = ""
+    if "coord_task_desc_form_value" not in st.session_state:
+        st.session_state["coord_task_desc_form_value"] = ""
+    if "coord_deadline_date_form_value" not in st.session_state:
+        st.session_state["coord_deadline_date_form_value"] = None
+    if "coord_deadline_time_form_value" not in st.session_state:
+        st.session_state["coord_deadline_time_form_value"] = None
+
+
     with st.form("create_general_task_form"):
-        title = st.text_input("Task Title", key="coord_task_title_form")
-        desc = st.text_area("Task Description", key="coord_task_desc_form")
+        # Use a new key for the form submission to avoid conflicts
+        submit_button_pressed = st.form_submit_button("Add Task to Pending Changes", key="coord_submit_task")
+
+        # Now, use the _value session state for the input defaults
+        title = st.text_input("Task Title", value=st.session_state["coord_task_title_form_value"], key="coord_task_title_form")
+        desc = st.text_area("Task Description", value=st.session_state["coord_task_desc_form_value"], key="coord_task_desc_form")
         col_deadline_date, col_deadline_time = st.columns(2)
         with col_deadline_date:
-            deadline_date = st.date_input("Deadline Date (Optional)", value=None, key="coord_deadline_date_form")
+            deadline_date = st.date_input("Deadline Date (Optional)", value=st.session_state["coord_deadline_date_form_value"], key="coord_deadline_date_form")
         with col_deadline_time:
-            deadline_time = st.time_input("Deadline Time (Optional)", value=None, key="coord_deadline_time_form")
+            deadline_time = st.time_input("Deadline Time (Optional)", value=st.session_state["coord_deadline_time_form_value"], key="coord_deadline_time_form")
 
         deadline_str = ""
         if deadline_date and deadline_time:
             deadline_str = f"{deadline_date.strftime('%Y-%m-%d')} {deadline_time.strftime('%H:%M')}"
-        elif deadline_date: # Default to end of day if only date is provided
+        elif deadline_date:
             deadline_str = f"{deadline_date.strftime('%Y-%m-%d')} 23:59"
 
-        if st.form_submit_button("Add Task to Pending Changes"):
+        if submit_button_pressed:
             if title.strip() and desc.strip():
                 add_pending_task(title, desc, "Unassigned", username, deadline_str)
-                # Clear form fields after submission
-                st.session_state["coord_task_title_form"] = ""
-                st.session_state["coord_task_desc_form"] = ""
-                st.session_state["coord_deadline_date_form"] = None
-                st.session_state["coord_deadline_time_form"] = None
-                st.experimental_rerun() # Rerun to clear form and show pending message
+                # Clear the temporary values used for inputs
+                st.session_state["coord_task_title_form_value"] = ""
+                st.session_state["coord_task_desc_form_value"] = ""
+                st.session_state["coord_deadline_date_form_value"] = None
+                st.session_state["coord_deadline_time_form_value"] = None
+                st.rerun() # Rerun to display cleared form and pending message
             else:
                 st.error("Please fill in task title and description.")
 
@@ -311,13 +318,12 @@ def coordinator_view():
 
         filtered_tasks = my_tasks if status_filter == "All" else [t for t in my_tasks if t.get("status") == status_filter]
 
-        # Sort by deadline (if available), then by status (pending first), then by creation timestamp
         def task_sort_key(task):
             deadline_val = task.get('deadline')
             try:
-                deadline_dt = datetime.strptime(deadline_val, "%Y-%m-%d %H:%M") if deadline_val else datetime.max # Treat no deadline as very far in future
+                deadline_dt = datetime.strptime(deadline_val, "%Y-%m-%d %H:%M") if deadline_val else datetime.max
             except ValueError:
-                deadline_dt = datetime.max # Treat invalid deadline as very far in future
+                deadline_dt = datetime.max
             status_order = 0 if task.get('status') == 'Pending' else 1
             timestamp_val = task.get('timestamp')
             try:
@@ -326,16 +332,14 @@ def coordinator_view():
                 timestamp_dt = datetime.min
             return (deadline_dt, status_order, timestamp_dt)
 
-        # Apply pending updates for display if any
         display_tasks = []
         for task in filtered_tasks:
             display_task = task.copy()
             if display_task['id'] in st.session_state["pending_task_updates"]:
                 for col, val in st.session_state["pending_task_updates"][display_task['id']].items():
-                    display_task[col] = val # Apply pending updates for display
+                    display_task[col] = val
             display_tasks.append(display_task)
 
-        # Filter out tasks marked for deletion
         display_tasks = [t for t in display_tasks if t['id'] not in st.session_state["pending_task_deletions"]]
 
         display_tasks.sort(key=task_sort_key)
@@ -348,7 +352,6 @@ def coordinator_view():
                 status_color = "🟢" if task.get('status') == "Done" else "🟡"
                 current_status_display = task.get('status', 'N/A')
 
-                # Handle status change input directly
                 new_status = st.radio(
                     "Status:",
                     ["Pending", "Done"],
@@ -403,20 +406,38 @@ def head_view():
 
     # --- Create New Task Section ---
     st.subheader("➕ Create & Assign New Task(s)")
+    st.info("Assigning to multiple coordinators will create separate tasks for each.")
+
+    # Initialize form inputs in session state if not already present
+    if "head_task_title_form_value" not in st.session_state:
+        st.session_state["head_task_title_form_value"] = ""
+    if "head_task_desc_form_value" not in st.session_state:
+        st.session_state["head_task_desc_form_value"] = ""
+    if "head_assignees_form_value" not in st.session_state:
+        st.session_state["head_assignees_form_value"] = []
+    if "head_deadline_date_create_form_value" not in st.session_state:
+        st.session_state["head_deadline_date_create_form_value"] = None
+    if "head_deadline_time_create_form_value" not in st.session_state:
+        st.session_state["head_deadline_time_create_form_value"] = None
+
+
     with st.form("create_assign_task_form"):
+        # Use a new key for the form submission to avoid conflicts
+        submit_button_pressed = st.form_submit_button("Add Task(s) to Pending Changes", key="head_submit_task")
+
         col_title, col_assignees = st.columns(2)
         with col_title:
-            title = st.text_input("Task Title", key="head_task_title_form")
+            title = st.text_input("Task Title", value=st.session_state["head_task_title_form_value"], key="head_task_title_form")
         with col_assignees:
-            assignees = st.multiselect("Assign To Coordinator(s)", coordinators, key="head_assignees_form")
+            assignees = st.multiselect("Assign To Coordinator(s)", coordinators, default=st.session_state["head_assignees_form_value"], key="head_assignees_form")
 
-        desc = st.text_area("Task Description", key="head_task_desc_form")
+        desc = st.text_area("Task Description", value=st.session_state["head_task_desc_form_value"], key="head_task_desc_form")
 
         col_deadline_date_create, col_deadline_time_create = st.columns(2)
         with col_deadline_date_create:
-            deadline_date_create = st.date_input("Deadline Date (Optional)", value=None, key="head_deadline_date_create_form")
+            deadline_date_create = st.date_input("Deadline Date (Optional)", value=st.session_state["head_deadline_date_create_form_value"], key="head_deadline_date_create_form")
         with col_deadline_time_create:
-            deadline_time_create = st.time_input("Deadline Time (Optional)", value=None, key="head_deadline_time_create_form")
+            deadline_time_create = st.time_input("Deadline Time (Optional)", value=st.session_state["head_deadline_time_create_form_value"], key="head_deadline_time_create_form")
 
         deadline_str_create = ""
         if deadline_date_create and deadline_time_create:
@@ -424,17 +445,17 @@ def head_view():
         elif deadline_date_create:
             deadline_str_create = f"{deadline_date_create.strftime('%Y-%m-%d')} 23:59"
 
-        if st.form_submit_button("Add Task(s) to Pending Changes"):
+        if submit_button_pressed:
             if title.strip() and desc.strip() and assignees:
                 for assignee in assignees:
                     add_pending_task(title, desc, assignee, username, deadline_str_create)
-                # Clear form fields after submission
-                st.session_state["head_task_title_form"] = ""
-                st.session_state["head_task_desc_form"] = ""
-                st.session_state["head_assignees_form"] = []
-                st.session_state["head_deadline_date_create_form"] = None
-                st.session_state["head_deadline_time_create_form"] = None
-                st.experimental_rerun() # Rerun to clear form and show pending message
+                # Clear the temporary values used for inputs
+                st.session_state["head_task_title_form_value"] = ""
+                st.session_state["head_task_desc_form_value"] = ""
+                st.session_state["head_assignees_form_value"] = []
+                st.session_state["head_deadline_date_create_form_value"] = None
+                st.session_state["head_deadline_time_create_form_value"] = None
+                st.rerun() # Rerun to display cleared form and pending message
             else:
                 st.error("Please fill in all fields and select at least one coordinator.")
     
@@ -460,19 +481,16 @@ def head_view():
     if assignee_filter != "All":
         filtered_tasks = [t for t in filtered_tasks if t.get("assigned_to") == assignee_filter]
 
-    # Apply pending updates for display if any
     display_tasks = []
     for task in filtered_tasks:
         display_task = task.copy()
         if display_task['id'] in st.session_state["pending_task_updates"]:
             for col, val in st.session_state["pending_task_updates"][display_task['id']].items():
-                display_task[col] = val # Apply pending updates for display
+                display_task[col] = val
         display_tasks.append(display_task)
 
-    # Filter out tasks marked for deletion
     display_tasks = [t for t in display_tasks if t['id'] not in st.session_state["pending_task_deletions"]]
 
-    # Sort by deadline (if available), then by status (pending first), then by creation timestamp
     def task_sort_key(task):
         deadline_val = task.get('deadline')
         try:
@@ -498,8 +516,6 @@ def head_view():
                 st.markdown(f"**Task: {task.get('title', 'N/A')}** (ID: {task.get('id', 'N/A')})")
                 st.markdown(f"📄 Description: {task.get('description', 'N/A')}")
 
-                status_color = "🟢" if task.get('status') == "Done" else "🟡" if task.get('status') == "Pending" else "🔴"
-                
                 # --- Task Actions (Inputs directly manipulate session state) ---
                 col_status, col_assignee, col_deadline_edit = st.columns([1, 1.5, 2])
 
@@ -556,19 +572,19 @@ def head_view():
                     new_deadline_str = ""
                     if new_deadline_date and new_deadline_time:
                         new_deadline_str = f"{new_deadline_date.strftime('%Y-%m-%d')} {new_deadline_time.strftime('%H:%M')}"
-                    elif new_deadline_date: # Default to end of day if only date
+                    elif new_deadline_date:
                         new_deadline_str = f"{new_deadline_date.strftime('%Y-%m-%d')} 23:59"
 
                     # Compare with the original value from the sheet, not the session state pending update
                     original_deadline_val = next((t.get('deadline') for t in all_tasks if t['id'] == task['id']), '')
-                    if new_deadline_str != original_deadline_val: # Only mark if truly changed from sheet value
+                    if new_deadline_str != original_deadline_val:
                         update_pending_task(task["id"], "deadline", new_deadline_str)
 
                 # Delete button (separated for safety)
-                st.markdown("---") # Separator before delete
+                st.markdown("---")
                 if st.button(f"🗑️ Delete Task {task.get('id')}", key=f"delete_btn_{task.get('id')}_{i}", type="secondary"):
                     delete_pending_task(task["id"])
-                    st.experimental_rerun() # Rerun to remove the task from display immediately
+                    st.rerun()
 
 # Entry point
 def main():
@@ -585,10 +601,9 @@ def main():
     .stButton > button {
         width: 100%;
     }
-    /* Style for radio buttons to make them compact */
     div[data-baseweb="radio"] {
-        flex-direction: row; /* Align radio buttons horizontally */
-        gap: 1rem; /* Space between radio buttons */
+        flex-direction: row;
+        gap: 1rem;
     }
     div[data-baseweb="radio"] > label {
         margin-right: 10px;
@@ -614,19 +629,18 @@ def main():
         if has_pending_changes:
             st.sidebar.warning("⚠️ You have unsaved changes!")
             if st.sidebar.button("💾 Save All Changes", key="save_all_changes_btn", type="primary"):
-                apply_pending_changes() # This function will handle rerun after saving
+                apply_pending_changes()
                 st.success("All changes saved successfully!")
         else:
             st.sidebar.info("No pending changes.")
             if st.sidebar.button("🔄 Refresh Data", key="refresh_data_btn"):
-                st.cache_data.clear() # Clear cache only
-                st.rerun() # Rerun to load fresh data
+                st.cache_data.clear()
+                st.rerun()
 
         if st.sidebar.button("🚪 Logout", key="logout_btn"):
             st.session_state.clear()
             st.rerun()
 
-        # Route to appropriate view
         if st.session_state["role"] == "Coordinator":
             coordinator_view()
         elif st.session_state["role"] == "Head":
